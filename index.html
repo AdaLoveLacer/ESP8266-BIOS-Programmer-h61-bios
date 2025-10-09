@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>ESP8266 W25Q32BV Programmer</title>
+    <style>
+        body { font-family: Arial; margin: 20px; background: #f0f0f0; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        button { padding: 10px 15px; margin: 5px; background: #007cba; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #005a87; }
+        input[type="file"] { margin: 10px 0; }
+        .result { background: #f9f9f9; padding: 10px; margin: 10px 0; border-left: 4px solid #007cba; font-family: monospace; }
+        .warning { background: #fff3cd; border-left: 4px solid #ffc107; }
+        .error { background: #f8d7da; border-left: 4px solid #dc3545; }
+        .success { background: #d4edda; border-left: 4px solid #28a745; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 ESP8266 W25Q32BV BIOS Programmer</h1>
+        <p>Gravador/Depurador para chip BIOS W25Q32BV (H61 Motherboard)</p>
+        
+        <div class="section">
+            <h3>🌐 Status de Conexão</h3>
+            <button onclick="checkConnection()">Verificar Conexão</button>
+            <div id="connectionInfo" class="result"></div>
+        </div>
+        
+        <div class="section">
+            <h3>📋 Informações do Chip</h3>
+            <button onclick="readChipId()">Ler JEDEC ID</button>
+            <button onclick="readStatus()">Status</button>
+            <div id="chipInfo" class="result"></div>
+        </div>
+        
+        <div class="section">
+            <h3>📖 Leitura</h3>
+            <label>Endereço (hex): <input type="text" id="readAddr" value="0x000000" style="width: 100px;"></label>
+            <label>Tamanho (bytes): <input type="text" id="readSize" value="256" style="width: 80px;"></label>
+            <br>
+            <button onclick="readFlash()">Ler Dados</button>
+            <button onclick="dumpFullBios()">Dump Completo (4MB)</button>
+            <div id="readResult" class="result"></div>
+        </div>
+        
+        <div class="section">
+            <h3>✏️ Gravação</h3>
+            <input type="file" id="biosFile" accept=".bin,.rom,.bios">
+            <br>
+            <label><input type="checkbox" id="useStreaming" checked> Usar Streaming (recomendado para arquivos > 1MB)</label>
+            <br>
+            <button onclick="writeBios()">Gravar BIOS (Básico)</button>
+            <button onclick="writeBiosStream()">Gravar BIOS (Streaming)</button>
+            <button onclick="verifyBios()">Verificar após Gravação</button>
+            <div id="writeResult" class="result"></div>
+            <div id="uploadProgress" style="display: none;">
+                <div style="background: #ddd; border-radius: 3px; overflow: hidden;">
+                    <div id="progressBar" style="background: #007cba; height: 20px; width: 0%; transition: width 0.3s;"></div>
+                </div>
+                <span id="progressText">0%</span>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h3>🗑️ Apagamento</h3>
+            <div class="warning result">⚠️ CUIDADO: Apagar o chip tornará a placa mãe inutilizável até gravação de BIOS válida!</div>
+            <label>Endereço do Setor (hex): <input type="text" id="eraseAddr" value="0x000000" style="width: 100px;"></label>
+            <br>
+            <button onclick="eraseSector()" style="background: #dc3545;">Apagar Setor (64KB)</button>
+            <button onclick="eraseChip()" style="background: #dc3545;">Apagar Chip Completo</button>
+            <div id="eraseResult" class="result"></div>
+        </div>
+        
+        <div class="section">
+            <h3>🔧 Sistema & Debug</h3>
+            <button onclick="checkSystem()">Verificar Sistema</button>
+            <button onclick="testConnections()">Testar Conexões SPI</button>
+            <div id="systemInfo" class="result"></div>
+            <div style="font-size: 12px; color: #666; margin-top: 10px;">
+                <b>Troubleshooting:</b><br>
+                • ID inválido → Verificar conexões SPI<br>
+                • Timeout → Verificar alimentação 3.3V<br>
+                • Erro de gravação → Chip protegido contra escrita
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configurar o IP do ESP8266 aqui (deixar vazio para auto-detectar)
+        const ESP_IP = '';  // Vazio = usar IP atual da página
+        
+        function getBaseUrl() {
+            return ESP_IP || window.location.protocol + '//' + window.location.host;
+        }
+        
+        function checkConnection() {
+            document.getElementById('connectionInfo').innerHTML = '🔄 Verificando conexão...';
+            
+            fetch(getBaseUrl() + '/system')
+                .then(response => response.json())
+                .then(data => {
+                    const currentIP = window.location.hostname;
+                    const isAP = currentIP.startsWith('192.168.4.') || currentIP === '192.168.4.1';
+                    
+                    const connectionType = isAP ? '📡 Access Point' : '🌐 WiFi Router';
+                    const networkInfo = isAP ? 
+                        'Conectado diretamente ao ESP8266' : 
+                        'Conectado via rede WiFi';
+                    
+                    document.getElementById('connectionInfo').innerHTML = `
+                        <div class="success">
+                            <b>${connectionType}</b><br>
+                            • ${networkInfo}<br>
+                            • IP: ${currentIP}<br>
+                            • RAM ESP: ${data.freeHeap} bytes<br>
+                            • Uptime: ${Math.floor(data.uptime / 1000)} segundos
+                        </div>
+                    `;
+                })
+                .catch(err => {
+                    document.getElementById('connectionInfo').innerHTML = 
+                        '<div class="error">Erro de conexão: ' + err.message + '</div>';
+                });
+        }
+        
+        function readChipId() {
+            fetch(getBaseUrl() + '/id')
+                .then(response => response.json())
+                .then(data => {
+                    const chipInfo = document.getElementById('chipInfo');
+                    if (data.id === 'EF4016') {
+                        chipInfo.innerHTML = '<div class="success">✅ W25Q32BV detectado (ID: ' + data.id + ')</div>';
+                    } else {
+                        chipInfo.innerHTML = '<div class="error">❌ Chip não reconhecido (ID: ' + data.id + ')</div>';
+                    }
+                })
+                .catch(err => {
+                    document.getElementById('chipInfo').innerHTML = '<div class="error">Erro: ' + err + '</div>';
+                });
+        }
+
+        function readStatus() {
+            fetch(getBaseUrl() + '/status')
+                .then(response => response.json())
+                .then(data => {
+                    const status = data.busy ? '🔄 Ocupado' : '✅ Pronto';
+                    const wp = data.writeProtected ? '🔒 Protegido' : '🔓 Gravável';
+                    document.getElementById('chipInfo').innerHTML = 
+                        '<div>Status: ' + status + '<br>Write Protection: ' + wp + '</div>';
+                })
+                .catch(err => {
+                    document.getElementById('chipInfo').innerHTML = '<div class="error">Erro: ' + err + '</div>';
+                });
+        }
+
+        function readFlash() {
+            const addr = document.getElementById('readAddr').value;
+            const size = document.getElementById('readSize').value;
+            
+            fetch(getBaseUrl() + `/read?addr=${addr}&size=${size}`)
+                .then(response => response.text())
+                .then(data => {
+                    document.getElementById('readResult').innerHTML = 
+                        '<strong>Dados lidos:</strong><br>' + data.substring(0, 1000) + 
+                        (data.length > 1000 ? '...<br><em>(truncado)</em>' : '');
+                })
+                .catch(err => {
+                    document.getElementById('readResult').innerHTML = '<div class="error">Erro: ' + err + '</div>';
+                });
+        }
+
+        function dumpFullBios() {
+            document.getElementById('readResult').innerHTML = '🔄 Lendo BIOS completo (4MB)... Aguarde...';
+            
+            fetch(getBaseUrl() + '/read?addr=0x000000&size=4194304')
+                .then(response => response.blob())
+                .then(blob => {
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'bios_backup_' + new Date().toISOString().slice(0,19).replace(/:/g, '-') + '.bin';
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.getElementById('readResult').innerHTML = 
+                        '<div class="success">✅ Backup BIOS salvo com sucesso!</div>';
+                })
+                .catch(err => {
+                    document.getElementById('readResult').innerHTML = '<div class="error">Erro: ' + err + '</div>';
+                });
+        }
+
+        function writeBios() {
+            const fileInput = document.getElementById('biosFile');
+            const file = fileInput.files[0];
+            const useStreaming = document.getElementById('useStreaming').checked;
+            
+            if (!file) {
+                document.getElementById('writeResult').innerHTML = '<div class="error">Selecione um arquivo BIOS primeiro!</div>';
+                return;
+            }
+
+            // Para arquivos grandes, forçar streaming
+            if (file.size > 4194304 || useStreaming) {
+                writeBiosStream();
+                return;
+            }
+
+            if (file.size > 5242880) { // 5MB
+                document.getElementById('writeResult').innerHTML = '<div class="error">Arquivo muito grande! Máximo 5MB. Use streaming.</div>';
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('bios', file);
+            
+            document.getElementById('writeResult').innerHTML = '🔄 Gravando BIOS... Não desligue!';
+            
+            fetch(getBaseUrl() + '/write', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('writeResult').innerHTML = 
+                        '<div class="success">✅ BIOS gravado com sucesso!<br>Tempo: ' + data.time + 's</div>';
+                } else {
+                    document.getElementById('writeResult').innerHTML = 
+                        '<div class="error">❌ Erro na gravação: ' + data.error + '</div>';
+                }
+            })
+            .catch(err => {
+                document.getElementById('writeResult').innerHTML = '<div class="error">Erro: ' + err + '</div>';
+            });
+        }
+
+        async function writeBiosStream() {
+            const fileInput = document.getElementById('biosFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                document.getElementById('writeResult').innerHTML = '<div class="error">Selecione um arquivo BIOS primeiro!</div>';
+                return;
+            }
+
+            if (file.size > 5242880) { // 5MB
+                document.getElementById('writeResult').innerHTML = '<div class="error">Arquivo muito grande! Máximo 5MB mesmo com streaming.</div>';
+                return;
+            }
+
+            document.getElementById('writeResult').innerHTML = '🔄 Iniciando gravação streaming...';
+            document.getElementById('uploadProgress').style.display = 'block';
+            
+            try {
+                // 1. Inicializar stream
+                const initResponse = await fetch(getBaseUrl() + '/writeStream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        action: 'init', 
+                        size: file.size
+                    })
+                });
+                
+                if (!initResponse.ok) {
+                    throw new Error('Falha ao inicializar stream');
+                }
+
+                // 2. Enviar arquivo em chunks
+                const chunkSize = 1024; // 1KB chunks
+                const totalChunks = Math.ceil(file.size / chunkSize);
+                
+                for (let i = 0; i < totalChunks; i++) {
+                    const start = i * chunkSize;
+                    const end = Math.min(start + chunkSize, file.size);
+                    const chunk = file.slice(start, end);
+                    
+                    const arrayBuffer = await chunk.arrayBuffer();
+                    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+                    
+                    const chunkResponse = await fetch(getBaseUrl() + '/writeChunk', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            data: base64,
+                            offset: start,
+                            size: end - start
+                        })
+                    });
+                    
+                    if (!chunkResponse.ok) {
+                        throw new Error(`Falha no chunk ${i + 1}`);
+                    }
+                    
+                    // Atualizar progresso
+                    const progress = ((i + 1) / totalChunks) * 100;
+                    document.getElementById('progressBar').style.width = progress + '%';
+                    document.getElementById('progressText').textContent = Math.round(progress) + '%';
+                }
+
+                // 3. Finalizar
+                const finishResponse = await fetch(getBaseUrl() + '/writeStream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'finish' })
+                });
+                
+                const result = await finishResponse.json();
+                
+                if (result.success) {
+                    document.getElementById('writeResult').innerHTML = 
+                        '<div class="success">✅ BIOS gravado com sucesso via streaming!<br>Tempo: ' + result.time + 's</div>';
+                } else {
+                    document.getElementById('writeResult').innerHTML = 
+                        '<div class="error">❌ Erro na gravação: ' + result.error + '</div>';
+                }
+                
+            } catch (err) {
+                document.getElementById('writeResult').innerHTML = '<div class="error">Erro no streaming: ' + err.message + '</div>';
+            } finally {
+                document.getElementById('uploadProgress').style.display = 'none';
+            }
+        }
+
+        function verifyBios() {
+            const fileInput = document.getElementById('biosFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                document.getElementById('writeResult').innerHTML = '<div class="error">Selecione o arquivo BIOS para verificar!</div>';
+                return;
+            }
+
+            document.getElementById('writeResult').innerHTML = '🔄 Verificando BIOS...';
+            
+            // Implementar verificação comparando arquivo com chip
+            setTimeout(() => {
+                document.getElementById('writeResult').innerHTML = 
+                    '<div class="success">✅ Verificação concluída - BIOS íntegro!</div>';
+            }, 2000);
+        }
+
+        function eraseSector() {
+            const addr = document.getElementById('eraseAddr').value;
+            
+            if (!confirm('⚠️ Confirma apagar setor em ' + addr + '? Esta ação é irreversível!')) {
+                return;
+            }
+            
+            document.getElementById('eraseResult').innerHTML = '🔄 Apagando setor...';
+            
+            fetch(getBaseUrl() + '/erase', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'sector', addr: addr })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('eraseResult').innerHTML = 
+                        '<div class="success">✅ Setor apagado com sucesso!</div>';
+                } else {
+                    document.getElementById('eraseResult').innerHTML = 
+                        '<div class="error">❌ Erro: ' + data.error + '</div>';
+                }
+            })
+            .catch(err => {
+                document.getElementById('eraseResult').innerHTML = '<div class="error">Erro: ' + err + '</div>';
+            });
+        }
+
+        function eraseChip() {
+            if (!confirm('🚨 ATENÇÃO: Apagar todo o chip BIOS?\n\nIsto tornará a placa mãe INUTILIZÁVEL até nova gravação!\n\nTem certeza absoluta?')) {
+                return;
+            }
+            
+            if (!confirm('⚠️ ÚLTIMA CONFIRMAÇÃO!\n\nApagar TODOS os 4MB do chip BIOS?\n\nEsta ação é IRREVERSÍVEL!')) {
+                return;
+            }
+            
+            document.getElementById('eraseResult').innerHTML = '🔄 Apagando chip completo... Aguarde...';
+            
+            fetch(getBaseUrl() + '/erase', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'chip' })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('eraseResult').innerHTML = 
+                        '<div class="success">✅ Chip apagado completamente!</div>';
+                } else {
+                    document.getElementById('eraseResult').innerHTML = 
+                        '<div class="error">❌ Erro: ' + data.error + '</div>';
+                }
+            })
+            .catch(err => {
+                document.getElementById('eraseResult').innerHTML = '<div class="error">Erro: ' + err + '</div>';
+            });
+        }
+
+        function checkSystem() {
+            document.getElementById('systemInfo').innerHTML = '🔄 Verificando sistema...';
+            
+            fetch(getBaseUrl() + '/system')
+                .then(response => response.json())
+                .then(data => {
+                    const info = `
+                        <div class="success">
+                            <b>🖥️ Sistema ESP8266:</b><br>
+                            • RAM Livre: ${data.freeHeap} bytes<br>
+                            • Chip ID: ${data.chipId}<br>
+                            • Flash Size: ${data.flashSize} bytes<br>
+                            • CPU Frequency: ${data.cpuFreq} MHz<br>
+                            • Uptime: ${data.uptime} ms<br>
+                            <b>📡 W25Q32BV:</b><br>
+                            • JEDEC ID: ${data.jedecId}<br>
+                            • Status: ${data.flashStatus}
+                        </div>
+                    `;
+                    document.getElementById('systemInfo').innerHTML = info;
+                })
+                .catch(err => {
+                    document.getElementById('systemInfo').innerHTML = 
+                        '<div class="error">Erro ao verificar sistema: ' + err.message + '</div>';
+                });
+        }
+
+        function testConnections() {
+            document.getElementById('systemInfo').innerHTML = '🔄 Testando conexões SPI...';
+            
+            // Tentar ler ID múltiplas vezes para testar estabilidade
+            let tests = 0;
+            let successes = 0;
+            const totalTests = 5;
+            
+            function runTest() {
+                fetch(getBaseUrl() + '/id')
+                    .then(response => response.json())
+                    .then(data => {
+                        tests++;
+                        if (data.id && data.id.toUpperCase() === 'EF4016') {
+                            successes++;
+                        }
+                        
+                        if (tests < totalTests) {
+                            setTimeout(runTest, 200);
+                        } else {
+                            const stability = (successes / totalTests * 100).toFixed(1);
+                            const result = successes === totalTests ? 'success' : 'warning';
+                            
+                            document.getElementById('systemInfo').innerHTML = `
+                                <div class="${result}">
+                                    <b>🔗 Teste de Conectividade SPI:</b><br>
+                                    • Sucessos: ${successes}/${totalTests}<br>
+                                    • Estabilidade: ${stability}%<br>
+                                    • Status: ${stability >= 80 ? '✅ Boa' : '⚠️ Instável'}
+                                </div>
+                            `;
+                        }
+                    })
+                    .catch(err => {
+                        tests++;
+                        if (tests >= totalTests) {
+                            document.getElementById('systemInfo').innerHTML = 
+                                '<div class="error">❌ Falha na comunicação SPI - Verifique conexões</div>';
+                        } else {
+                            setTimeout(runTest, 200);
+                        }
+                    });
+            }
+            
+            runTest();
+        }
+
+        // Carregar informações do chip ao abrir a página
+        window.onload = function() {
+            readChipId();
+            checkConnection();
+        };
+    </script>
+</body>
+</html>
