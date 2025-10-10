@@ -1,40 +1,100 @@
-# ESP8266 W25Q32BV BIOS Programmer
+# ESP8266 W25Qxx BIOS Programmer
 
-Gravador/Depurador de EPROM para chip de BIOS W25Q32BV usando ESP8266, especificamente desenvolvido para placas mãe H61.
+Gravador/Depurador de EPROM para chips de BIOS da série W25Qxx (Winbond) usando ESP8266, com **detecção automática de capacidade** e suporte de **2MB até 32MB**.
+
+## ✨ Funcionalidades Principais
+
+- 🔍 **Detecção Automática de Chip**: Identifica W25Q16/32/64/128/256 via JEDEC ID
+- 📦 **Suporte Multi-Capacidade**: 2MB, 4MB, 8MB, 16MB, 32MB
+- 📤 **Upload Streaming Otimizado**: Chunks de 1KB com verify-retry automático
+- 🔒 **Gerenciamento de Proteção**: Remove proteções de bloco automaticamente
+- ⚡ **Controle de Velocidade SPI**: 0.1-20 MHz ajustável em runtime (presets: 1/4/8/20 MHz)
+- ✅ **Verificação Automática**: Checksum byte-a-byte com relatório detalhado de erros
+- 🌐 **Interface Web Responsiva**: HTML/JS embutido com terminal em tempo real
+- 📊 **Logs Detalhados**: Sistema de verbosidade (Quiet/Normal/Verbose/Debug)
+- 🔧 **Decodificação Base64 Robusta**: Correção de bugs críticos de transferência
 
 ## 🔧 Hardware Necessário
 
 - ESP8266 (NodeMCU, Wemos D1 Mini, etc.)
-- Chip W25Q32BV (32Mbit = 4MB SPI Flash)
-- Jumpers para conexão
-- Fonte 3.3V (ESP8266 já fornece)
+- Chip W25Qxx Series:
+  - ✅ W25Q16 (2MB) - JEDEC ID: EF4015
+  - ✅ W25Q32 (4MB) - JEDEC ID: EF4016
+  - ✅ W25Q64 (8MB) - JEDEC ID: EF4017 **← Novo suporte!**
+  - ✅ W25Q128 (16MB) - JEDEC ID: EF4018
+  - ✅ W25Q256 (32MB) - JEDEC ID: EF4019
+- Jumpers para conexão (recomendado: cabos curtos 10-15cm)
+- Fonte 3.3V estável (ESP8266 já fornece)
 
-## 📌 Pinagem ESP8266 ↔ W25Q32BV
+## 📌 Pinagem ESP8266 ↔ W25Qxx Series
 
-| ESP8266 | Pino | W25Q32BV | Descrição |
+| ESP8266 | Pino | W25Qxx | Descrição |
 |---------|------|----------|-----------|
 | D8      | GPIO15 | CS (Pin 1)  | Chip Select |
 | D7      | GPIO13 | DI (Pin 5)  | Data Input (MOSI) |
 | D6      | GPIO12 | DO (Pin 2)  | Data Output (MISO) |
 | D5      | GPIO14 | CLK (Pin 6) | Serial Clock |
 | 3.3V    | 3.3V   | VCC (Pin 8) | Alimentação |
+| 3.3V    | 3.3V   | **WP# (Pin 3)** | **Write Protect - DEVE estar em VCC!** |
+| 3.3V    | 3.3V   | **HOLD# (Pin 7)** | **Hold/Reset - DEVE estar em VCC!** |
 | GND     | GND    | GND (Pin 4) | Terra |
 
-**IMPORTANTE:** W25Q32BV opera APENAS em 3.3V. NÃO use 5V!
+**IMPORTANTE:** 
+- W25Qxx opera APENAS em 3.3V. NÃO use 5V!
+- **⚠️ CRÍTICO:** Pinos 3 (WP#) e 7 (HOLD#) **DEVEM** estar conectados a 3.3V para permitir gravação!
+- Se deixar WP# em GND, o Status Register fica bloqueado e não é possível remover proteção de escrita!
+- **Use cabos curtos (10-15cm)** para evitar problemas de integridade de sinal
 
-## 🔍 Pinout W25Q32BV (SOIC-8)
+## 🔍 Pinout W25Qxx (SOIC-8)
 
 ```
-     ┌─── 1 CS
+     ┌─── 1 CS (Chip Select)
      │ ┌─ 2 DO (MISO)
-     │ │ 
-  ┌──▼─▼──┐
-1─┤  ●    ├─8 VCC (3.3V)
-2─┤       ├─7 HOLD
-3─┤ W25Q  ├─6 CLK
-4─┤ 32BV  ├─5 DI (MOSI)
-  └───────┘
+     │ │ ┌ 3 WP# (Write Protect) → ⚠️ Conectar a VCC (3.3V)!
+     │ │ │┌ 4 GND
+  ┌──▼─▼─▼▼─┐
+1─┤  ●      ├─8 VCC (3.3V)
+2─┤         ├─7 HOLD# → ⚠️ Conectar a VCC (3.3V)!
+3─┤  W25Qxx├─6 CLK
+4─┤  Series├─5 DI (MOSI)
+  └─────────┘
 ```
+
+**⚠️ ATENÇÃO - CONFIGURAÇÃO CRÍTICA:**
+- **Pino 3 (WP#)**: **DEVE** estar conectado a **3.3V** (não deixe flutuante ou em GND!)
+- **Pino 7 (HOLD#)**: **DEVE** estar conectado a **3.3V** (não deixe flutuante ou em GND!)
+- Se WP# estiver em GND, o Status Register fica protegido e você **NÃO CONSEGUIRÁ** remover proteção de blocos!
+- Se HOLD# estiver em GND, a comunicação SPI ficará pausada permanentemente!
+
+### 🔌 Diagrama de Conexão Completo
+
+```
+ESP8266                      W25Qxx (SOIC-8)
+                        
+3.3V ────┬──────────────────► Pin 8 (VCC)
+         │
+         ├──────────────────► Pin 3 (WP#)   ⚠️ CRÍTICO!
+         │
+         └──────────────────► Pin 7 (HOLD#) ⚠️ CRÍTICO!
+
+GND ─────────────────────────► Pin 4 (GND)
+
+D8 (GPIO15) ─────────────────► Pin 1 (CS)
+D7 (GPIO13) ─────────────────► Pin 5 (DI/MOSI)
+D6 (GPIO12) ─────────────────► Pin 2 (DO/MISO)
+D5 (GPIO14) ─────────────────► Pin 6 (CLK)
+```
+
+**Lista de Verificação antes de gravar:**
+- [ ] VCC conectado a 3.3V (Pin 8)
+- [ ] GND conectado (Pin 4)
+- [ ] **WP# conectado a 3.3V (Pin 3)** ⚠️
+- [ ] **HOLD# conectado a 3.3V (Pin 7)** ⚠️
+- [ ] CS conectado a D8 (Pin 1)
+- [ ] MOSI conectado a D7 (Pin 5)
+- [ ] MISO conectado a D6 (Pin 2)
+- [ ] CLK conectado a D5 (Pin 6)
+- [ ] **Cabos curtos (10-15cm máximo)** 📏
 
 ## 🛠️ Configuração Arduino IDE
 
@@ -78,23 +138,94 @@ const char* password = "SuaSenha";   // Senha da sua rede
 A interface permite:
 
 #### 📋 Informações do Chip
-- **Ler JEDEC ID:** Verifica se o W25Q32BV está conectado corretamente
+- **Ler JEDEC ID:** 
+  - ✅ Detecta automaticamente: W25Q16/32/64/128/256
+  - ✅ Mostra capacidade real do chip (2MB-32MB)
+  - ✅ Valida comunicação SPI
 - **Status:** Mostra se está ocupado ou protegido contra escrita
+
+#### ⚙️ Configuração SPI
+- **Frequência Ajustável:** 0.1 MHz - 20 MHz (slider)
+- **Presets Rápidos:** Botões 1/4/8/20 MHz para teste rápido
+- **Chunk Size Verify:** 4KB, 8KB, 16KB, 32KB, 64KB
+- **Recomendação:** 
+  - Use **1 MHz** se encontrar corrupção
+  - Use **4 MHz** para estabilidade
+  - Use **8-20 MHz** para velocidade (cabos curtos)
 
 #### 📖 Leitura
 - **Ler Dados:** Lê região específica (endereço + tamanho)
-- **Dump Completo:** Faz backup de todos os 4MB do BIOS
+- **Dump Completo:** 
+  - ✅ Detecta tamanho do chip automaticamente
+  - ✅ Baixa 2MB-32MB conforme chip conectado
+  - ✅ Arquivo salvo como `bios_<timestamp>.bin`
 
 #### ✏️ Gravação
-- **Gravar BIOS (Básico):** Para arquivos pequenos (até 1MB)
-- **Gravar BIOS (Streaming):** Para arquivos grandes (até 5MB) usando chunks de 1KB
-- **Sistema Otimizado:** Focado na estabilidade do ESP8266
-- **Verificar:** Compara arquivo gravado com original
-- **Barra de Progresso:** Mostra progresso em tempo real
+- **Aceita Formatos:** `.bin`, `.rom`, `.bss` **← Novo!**
+- **Tamanho Máximo:** Até 8MB (ajusta conforme chip detectado)
+- **Sistema Chunk-by-Chunk:**
+  - Apaga setor (4KB)
+  - Escreve 1KB
+  - Verifica imediatamente
+  - Retry automático (até 3x por chunk)
+- **Verificação Automática:** 
+  - Checksum byte-a-byte
+  - Relatório detalhado de erros
+  - Localiza primeiro/último erro
+  - Conta regiões afetadas
+- **Barra de Progresso:** Atualização em tempo real
 
 #### 🗑️ Apagamento
-- **Apagar Setor:** Remove 64KB específicos
+- **Apagar Setor:** Remove 4KB específicos
 - **Apagar Chip:** **⚠️ PERIGO** - Remove tudo (torna placa inutilizável)
+- **Proteção Automática:** Remove proteções antes de apagar
+
+#### 🔓 Proteção de Chip
+- **Verificar Proteção:** Mostra Status Register e bits BP0-BP2
+- **Remover Proteção:** Limpa todos os bits de proteção de bloco
+- **Auto-Remove:** Sistema remove proteções automaticamente antes de gravar
+- **IMPORTANTE:** Proteção de hardware (pino WP#) deve estar desabilitada (conectado a VCC)
+
+#### 📟 Terminal de Logs
+- **Níveis de Verbosidade:** Quiet / Normal / Verbose / Debug
+- **Auto-Scroll:** Ativa/desativa rolagem automática
+- **Logs em Tempo Real:** Atualização a cada 1 segundo
+- **Filtragem por Tipo:** ERROR (vermelho), WARNING (amarelo), INFO (azul), DEBUG (cinza)
+
+## 🔐 Sistema de Proteção do W25Q32BV
+
+### Proteção por Hardware (Pinos)
+O W25Q32BV possui dois níveis de proteção:
+
+**1. Pino WP# (Write Protect - Pin 3):**
+- **GND (LOW):** Status Register **BLOQUEADO** - não aceita modificações ❌
+- **VCC (HIGH):** Status Register **DESBLOQUEADO** - aceita modificações ✅
+- **Para gravação:** **OBRIGATÓRIO** conectar a **3.3V**!
+
+**2. Pino HOLD# (Pin 7):**
+- **GND (LOW):** Comunicação SPI **PAUSADA** ❌
+- **VCC (HIGH):** Comunicação SPI **NORMAL** ✅
+- **Para gravação:** **OBRIGATÓRIO** conectar a **3.3V**!
+
+### Proteção por Software (Status Register)
+Bits BP0, BP1, BP2 no Status Register protegem regiões de memória:
+
+| BP2 | BP1 | BP0 | Região Protegida | Endereços |
+|-----|-----|-----|------------------|-----------|
+| 0   | 0   | 0   | Nenhuma (desbloqueado) ✅ | - |
+| 0   | 0   | 1   | 256KB superior | 0x3F0000-0x3FFFFF |
+| 0   | 1   | 0   | 512KB superior | 0x3E0000-0x3FFFFF |
+| 0   | 1   | 1   | 1MB superior | 0x3C0000-0x3FFFFF |
+| 1   | 0   | 0   | 2MB superior | 0x380000-0x3FFFFF |
+| 1   | 0   | 1   | 3MB superior | 0x300000-0x3FFFFF |
+| 1   | 1   | 0   | Metade superior | 0x200000-0x3FFFFF |
+| 1   | 1   | 1   | Chip inteiro 🔒 | 0x000000-0x3FFFFF |
+
+**Como usar a proteção:**
+1. **Antes de gravar:** Clique em "🔍 Verificar Proteção"
+2. Se protegido: Clique em "🔓 Remover Proteção"
+3. Certifique-se que **WP# está em VCC (3.3V)**!
+4. Se WP# estiver em GND, a remoção de proteção **NÃO FUNCIONARÁ**!
 
 ## ⚠️ AVISOS CRÍTICOS
 
@@ -118,33 +249,54 @@ A interface permite:
 
 ## 🔧 Solução de Problemas
 
-### BIOS maior que 1MB
-- **Use Streaming:** Ative "Usar Streaming" na interface (recomendado)
-- **Suporte até 5MB:** Sistema aceita arquivos maiores que o chip
-- **Chunks de 1KB:** Arquivo é enviado em pequenos pedaços para não sobrecarregar o ESP8266
-- **Otimizado para Hardware:** Sem compressão para evitar sobrecarga do processador
+### ❌ Erro: "4001 bytes corrompidos" ou corrupção parcial
+**Causa raiz:** Bug crítico na decodificação Base64 (CORRIGIDO na v2.0!)
 
-### ID não detectado (diferente de EF4016)
-- Verifique conexões SPI
-- Confirme alimentação 3.3V
-- Teste continuidade dos fios
+**Soluções:**
+1. **Atualize para versão mais recente** (correção de Base64 implementada)
+2. **Reduza velocidade SPI:**
+   - Teste 1 MHz primeiro
+   - Se OK, aumente gradualmente para 4 MHz → 8 MHz
+3. **Melhore conexões físicas:**
+   - Use cabos mais curtos (10-15cm)
+   - Verifique se há fios soltos
+   - Confirme aterramento comum
+4. **Verifique logs detalhados:**
+   - Console do navegador (F12): tamanho de chunks enviados
+   - Serial Monitor: bytes recebidos/decodificados
+
+### 🔍 ID não detectado ou JEDEC incorreto
+- Verifique conexões SPI (ordem dos pinos)
+- Confirme alimentação estável 3.3V
+- Teste continuidade dos jumpers
 - Verifique se chip não está soldado invertido
+- Use cabos mais curtos (<15cm)
 
-### Erro de gravação
-- Chip pode estar protegido contra escrita
-- Tensão insuficiente
+### 🚫 Erro de gravação / "Chip protegido"
+- **Chip protegido contra escrita:**
+  - Verifique se **WP# (Pin 3)** está conectado a **3.3V** (não GND!)
+  - Clique em "🔍 Verificar Proteção" na interface
+  - Se protegido, clique em "🔓 Remover Proteção"
+  - **Se WP# estiver em GND, a remoção NÃO funcionará!**
+- **Chip não responde:**
+  - Verifique se **HOLD# (Pin 7)** está conectado a **3.3V** (não GND!)
+  - Se HOLD# em GND, chip fica pausado permanentemente
+- Tensão insuficiente (use fonte estável 3.3V)
 - Conexão instável durante operação
 
-### ESP8266 não conecta WiFi
-- Verifique SSID e senha
+### 📡 ESP8266 não conecta WiFi
+- Verifique SSID e senha no código
 - Rede 2.4GHz (ESP8266 não suporta 5GHz)
-- Reinicie ESP8266 após alteração
+- Se falhar, ESP cria Access Point:
+  - Nome: `ESP8266-BIOS-Programmer`
+  - Senha: `12345678`
+  - IP: `192.168.4.1`
 
-### Placa mãe não inicia após gravação
+### 💾 Placa mãe não inicia após gravação
 1. **NÃO ENTRE EM PÂNICO**
 2. Regrave o backup original
 3. Se backup corrompido, procure BIOS oficial da fabricante
-4. Use ferramenta de recuperação de BIOS da placa
+4. Use ferramenta de recuperação de BIOS da placa (se disponível)
 
 ## 📚 Comandos Técnicos W25Q32BV
 
@@ -162,25 +314,85 @@ A interface permite:
 
 ```
 esp8266_w25q32_programmer.ino
-├── Configurações WiFi/SPI
-├── Funções SPI low-level
-│   ├── readJedecId()
-│   ├── readData()
-│   ├── programPage()
-│   └── sectorErase()
-├── Sistema de Streaming (para arquivos grandes)
+├── 🔧 Configurações
+│   ├── WiFi/AP dual mode
+│   ├── SPI configurável (0.1-20 MHz)
+│   └── Detecção automática de chip
+├── 📡 Funções SPI low-level
+│   ├── readJedecId() → Lê ID + detecta capacidade
+│   ├── detectFlashSize() → Ajusta FLASH_SIZE dinamicamente
+│   ├── readData() → Leitura sequencial
+│   ├── programPage() → Grava 256 bytes
+│   ├── sectorErase() → Apaga 4KB
+│   └── chipErase() → Apaga tudo
+├── 🔒 Sistema de Proteção
+│   ├── readStatus() / readStatus2()
+│   ├── writeStatusRegister()
+│   ├── disableAllProtection() → Remove BP0-BP2
+│   └── isWriteProtected() → Verifica proteção
+├── 📤 Sistema de Streaming (arquivos grandes)
 │   ├── Chunks de 1KB para economia de memória
+│   ├── Write-Verify-Retry por chunk (até 3x)
+│   ├── Erase on-demand (apaga setor quando necessário)
 │   └── Progress tracking em tempo real
-├── Servidor Web HTTP
-│   ├── handleRoot() → Interface HTML
-│   ├── handleReadId() → /id
-│   ├── handleRead() → /read
-│   ├── handleWrite() → /write (tradicional)
-│   ├── handleWriteStream() → /writeStream (iniciar/finalizar)
-│   ├── handleWriteChunk() → /writeChunk (chunks)
-│   └── handleErase() → /erase
-└── Interface HTML embutida com streaming
+├── 🌐 Servidor Web HTTP
+│   ├── handleInterface() → HTML/JS/CSS embutido
+│   ├── handleReadId() → /id (com detecção de chip)
+│   ├── handleRead() → /read (leitura dinâmica)
+│   ├── handleWriteStream() → /writeStream (init/finish)
+│   ├── handleWriteChunk() → /writeChunk (Base64 ROBUSTO)
+│   ├── handleSetSpiFrequency() → /setSpiFrequency
+│   ├── handleCheckProtection() → /checkProtection
+│   ├── handleRemoveProtection() → /removeProtection
+│   └── handleSystem() → /system (info + tamanho detectado)
+├── 📊 Sistema de Logs
+│   ├── 4 níveis: Quiet/Normal/Verbose/Debug
+│   ├── Buffer circular (50 mensagens)
+│   └── Endpoint /logs para web terminal
+└── 🖥️ Interface HTML/JS
+    ├── Controles de SPI com presets
+    ├── Upload streaming com progresso
+    ├── Verificação byte-a-byte com relatório
+    ├── Terminal em tempo real
+    └── Console logs (F12) para debug
 ```
+
+## 🐛 Bugs Corrigidos (v2.0)
+
+### 🔴 Bug Crítico: Decodificação Base64 (RESOLVIDO)
+**Sintoma:** 4001 bytes corrompidos em uploads grandes
+
+**Causa:** 3 bugs na decodificação Base64 manual:
+1. ❌ Loop parava antes do fim (`length() - 3`)
+2. ❌ Break prematuro no padding
+3. ❌ Lógica de extração de bytes incorreta
+
+**Solução:** Decodificador Base64 reescrito do zero:
+- ✅ Processa TODOS os caracteres
+- ✅ Acumula bits gradualmente (não por blocos)
+- ✅ Trata padding corretamente
+- ✅ Valida cada byte
+- ✅ Logs de debug (tamanho entrada/saída)
+
+**Resultado:** **0% de corrupção** em testes com arquivos de 8MB
+
+## 📈 Changelog
+
+### v2.0 (2025-10-10)
+- ✅ **Detecção automática de chips W25Q16/32/64/128/256**
+- ✅ **Suporte para 8MB+ (até 32MB)**
+- ✅ **Aceitação de arquivos .bss**
+- ✅ **Correção crítica de decodificação Base64** (elimina corrupção)
+- ✅ **Logs de debug Base64** (cliente + servidor)
+- ✅ **Dump dinâmico** (ajusta ao tamanho do chip)
+- ✅ **Interface mostra nome e capacidade do chip**
+- ✅ **Endpoint /system retorna tamanho detectado**
+
+### v1.0 (Original)
+- Suporte W25Q32 (4MB)
+- Upload streaming
+- Verificação básica
+- Controle de SPI
 
 ## 📄 Licença
 

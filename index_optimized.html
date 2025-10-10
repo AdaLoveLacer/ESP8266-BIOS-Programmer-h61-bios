@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>ESP8266 W25Q32BV Programmer - Optimized</title>
+    <style>
+        body { font-family: Arial; margin: 20px; background: #f0f0f0; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        button { padding: 10px 15px; margin: 5px; background: #007cba; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #005a87; }
+        input[type="file"] { margin: 10px 0; }
+        .result { background: #f9f9f9; padding: 10px; margin: 10px 0; border-left: 4px solid #007cba; font-family: monospace; }
+        .warning { background: #fff3cd; border-left: 4px solid #ffc107; }
+        .error { background: #f8d7da; border-left: 4px solid #dc3545; }
+        .success { background: #d4edda; border-left: 4px solid #28a745; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 ESP8266 W25Q32BV BIOS Programmer - OPTIMIZADO</h1>
+        <p>Gravador/Depurador para chip BIOS W25Q32BV (H61 Motherboard)</p>
+        <div class="warning result">⚡ VERSÃO OTIMIZADA: SPI 500kHz, Chunks 512B, Verificação por chunk</div>
+        
+        <div class="section">
+            <h3>🌐 Status de Conexão</h3>
+            <button onclick="checkConnection()">Verificar Conexão</button>
+            <div id="connectionInfo" class="result"></div>
+        </div>
+        
+        <div class="section">
+            <h3>📋 Informações do Chip</h3>
+            <button onclick="readChipId()">Ler JEDEC ID</button>
+            <button onclick="readStatus()">Status</button>
+            <div id="chipInfo" class="result"></div>
+        </div>
+        
+        <div class="section">
+            <h3>📖 Leitura</h3>
+            <label>Endereço (hex): <input type="text" id="readAddr" value="0x000000" style="width: 100px;"></label>
+            <label>Tamanho (bytes): <input type="text" id="readSize" value="256" style="width: 80px;"></label>
+            <br>
+            <button onclick="readFlash()">Ler Dados</button>
+            <button onclick="dumpFullBios()">Dump Completo (4MB)</button>
+            <div id="readResult" class="result"></div>
+        </div>
+        
+        <div class="section">
+            <h3>✏️ Gravação</h3>
+            <input type="file" id="biosFile" accept=".bin,.rom,.bios">
+            <br>
+            <label><input type="checkbox" id="useStreaming" checked> Usar Streaming (recomendado)</label>
+            <br>
+            <label><input type="checkbox" id="autoVerify" checked> Verificação Automática</label>
+            <br>
+            <button onclick="writeBiosStream()">Gravar BIOS (Streaming Otimizado)</button>
+            <button onclick="verifyBios()">Verificar BIOS Gravado</button>
+            <div id="writeResult" class="result"></div>
+            <div id="uploadProgress" style="display: none;">
+                <div style="background: #ddd; border-radius: 3px; overflow: hidden;">
+                    <div id="progressBar" style="background: #007cba; height: 20px; width: 0%; transition: width 0.3s;"></div>
+                </div>
+                <span id="progressText">0%</span>
+            </div>
+            <div id="verifyResult" class="result" style="display: none;"></div>
+        </div>
+        
+        <div class="section">
+            <h3>🗑️ Apagamento</h3>
+            <div class="warning result">⚠️ CUIDADO: Apagar o chip tornará a placa mãe inutilizável!</div>
+            <label>Endereço do Setor: <input type="text" id="eraseAddr" value="0x000000" style="width: 100px;"></label>
+            <br>
+            <button onclick="eraseSector()" style="background: #dc3545;">Apagar Setor (64KB)</button>
+            <button onclick="eraseChip()" style="background: #dc3545;">Apagar Chip Completo</button>
+            <div id="eraseResult" class="result"></div>
+        </div>
+        
+        <div class="section">
+            <h3>🔧 Sistema & Debug</h3>
+            <button onclick="checkSystem()">Verificar Sistema</button>
+            <button onclick="testConnections()">Testar Conexões SPI</button>
+            <button onclick="diagnosticTest()">Diagnóstico Avançado</button>
+            <button onclick="sectorTest()">Teste Setor por Setor</button>
+            <div id="systemInfo" class="result"></div>
+        </div>
+    </div>
+
+    <script>
+        // Variáveis globais para verificação
+        let originalFileData = null;
+        let originalFileName = '';
+        let originalFileSize = 0;
+        let originalChecksum = '';
+
+        // Função para calcular CRC32
+        function crc32(data) {
+            const table = [];
+            for (let i = 0; i < 256; i++) {
+                let c = i;
+                for (let j = 0; j < 8; j++) {
+                    c = (c & 1) ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+                }
+                table[i] = c;
+            }
+            let crc = 0 ^ (-1);
+            for (let i = 0; i < data.length; i++) {
+                crc = (crc >>> 8) ^ table[(crc ^ data[i]) & 0xFF];
+            }
+            return (crc ^ (-1)) >>> 0;
+        }
+
+        // Monitor de arquivo carregado
+        document.addEventListener('DOMContentLoaded', function() {
+            const fileInput = document.getElementById('biosFile');
+            fileInput.addEventListener('change', async function(e) {
+                if (e.target.files.length > 0) {
+                    const file = e.target.files[0];
+                    originalFileName = file.name;
+                    originalFileSize = file.size;
+                    
+                    const arrayBuffer = await file.arrayBuffer();
+                    originalFileData = new Uint8Array(arrayBuffer);
+                    originalChecksum = crc32(originalFileData).toString(16).toUpperCase();
+                    
+                    console.log('Arquivo carregado:', originalFileName, '(', originalFileSize, 'bytes)');
+                    console.log('CRC32:', originalChecksum);
+                    
+                    document.getElementById('writeResult').innerHTML = 
+                        '<div class="success">📁 Arquivo: ' + originalFileName + 
+                        '<br>📏 Tamanho: ' + originalFileSize + ' bytes' +
+                        '<br>🔐 CRC32: ' + originalChecksum + '</div>';
+                }
+            });
+        });
+
+        // Função de conexão
+        function checkConnection() {
+            document.getElementById('connectionInfo').innerHTML = '🔄 Verificando...';
+            fetch('/system')
+                .then(r => r.json())
+                .then(d => {
+                    const ip = window.location.hostname;
+                    const isAP = ip.startsWith('192.168.4.');
+                    const type = isAP ? '📡 Access Point' : '🌐 WiFi Router';
+                    document.getElementById('connectionInfo').innerHTML = 
+                        '<div class="success"><b>' + type + '</b><br>IP: ' + ip + '<br>RAM: ' + d.freeHeap + ' bytes<br>⚡ SPI: 500kHz (Otimizado)</div>';
+                })
+                .catch(e => document.getElementById('connectionInfo').innerHTML = '<div class="error">Erro: ' + e + '</div>');
+        }
+
+        // Funções básicas
+        function readChipId() {
+            fetch('/id')
+                .then(r => r.json())
+                .then(d => {
+                    const info = d.id === 'EF4016' ? 
+                        '<div class="success">✅ W25Q32BV (' + d.id + ')</div>' : 
+                        '<div class="error">❌ ID: ' + d.id + '</div>';
+                    document.getElementById('chipInfo').innerHTML = info;
+                })
+                .catch(e => document.getElementById('chipInfo').innerHTML = '<div class="error">' + e + '</div>');
+        }
+
+        function readStatus() {
+            fetch('/status')
+                .then(r => r.json())
+                .then(d => {
+                    const status = d.busy ? '🔄 Ocupado' : '✅ Pronto';
+                    const wp = d.writeProtected ? '🔒 Protegido' : '🔓 Gravável';
+                    document.getElementById('chipInfo').innerHTML = '<div>Status: ' + status + '<br>Write Protection: ' + wp + '</div>';
+                })
+                .catch(e => document.getElementById('chipInfo').innerHTML = '<div class="error">' + e + '</div>');
+        }
+
+        // Dump com chunks menores para maior confiabilidade
+        async function dumpFullBios() {
+            document.getElementById('readResult').innerHTML = '🔄 Iniciando dump streaming (4MB)...';
+            document.getElementById('uploadProgress').style.display = 'block';
+            
+            try {
+                const totalSize = 4194304; // 4MB
+                const chunkSize = 2048;    // 2KB chunks para maior confiabilidade
+                const totalChunks = Math.ceil(totalSize / chunkSize);
+                
+                const biosData = new Uint8Array(totalSize);
+                let offset = 0;
+                
+                for (let i = 0; i < totalChunks; i++) {
+                    const currentChunkSize = Math.min(chunkSize, totalSize - offset);
+                    const hexAddr = '0x' + offset.toString(16).padStart(6, '0').toUpperCase();
+                    
+                    const response = await fetch('/read?addr=' + hexAddr + '&size=' + currentChunkSize);
+                    if (!response.ok) throw new Error('Falha no chunk ' + (i + 1));
+                    
+                    const chunkBuffer = await response.arrayBuffer();
+                    biosData.set(new Uint8Array(chunkBuffer), offset);
+                    offset += currentChunkSize;
+                    
+                    const progress = ((i + 1) / totalChunks) * 100;
+                    document.getElementById('progressBar').style.width = progress + '%';
+                    document.getElementById('progressText').textContent = Math.round(progress) + '%';
+                    
+                    // Delay menor para chunks menores
+                    await new Promise(resolve => setTimeout(resolve, 5));
+                }
+                
+                const blob = new Blob([biosData], { type: 'application/octet-stream' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'bios_backup_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.bin';
+                a.click();
+                window.URL.revokeObjectURL(url);
+                
+                document.getElementById('readResult').innerHTML = '<div class="success">✅ Backup completo!</div>';
+            } catch (err) {
+                document.getElementById('readResult').innerHTML = '<div class="error">❌ ' + err.message + '</div>';
+            } finally {
+                document.getElementById('uploadProgress').style.display = 'none';
+            }
+        }
+
+        // Gravação otimizada com chunks menores
+        async function writeBiosStream() {
+            if (!originalFileData) {
+                alert('Selecione um arquivo BIOS primeiro!');
+                return;
+            }
+
+            document.getElementById('writeResult').innerHTML = '🔄 Iniciando gravação streaming otimizada...';
+            document.getElementById('uploadProgress').style.display = 'block';
+            document.getElementById('verifyResult').style.display = 'none';
+
+            try {
+                // 1. Inicializar upload
+                const response = await fetch('/writeStream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'init', size: originalFileSize })
+                });
+                if (!response.ok) throw new Error('Falha ao inicializar streaming');
+
+                // 2. Enviar arquivo em chunks menores para maior confiabilidade
+                const chunkSize = 512; // 512 bytes para máxima confiabilidade
+                const totalChunks = Math.ceil(originalFileSize / chunkSize);
+                
+                for (let i = 0; i < totalChunks; i++) {
+                    const start = i * chunkSize;
+                    const end = Math.min(start + chunkSize, originalFileSize);
+                    const chunk = originalFileData.slice(start, end);
+                    const base64 = btoa(String.fromCharCode(...chunk));
+                    
+                    const chunkResponse = await fetch('/writeChunk', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ data: base64 })
+                    });
+                    
+                    if (!chunkResponse.ok) throw new Error('Falha chunk ' + (i + 1));
+                    
+                    const progress = ((i + 1) / totalChunks) * 100;
+                    document.getElementById('progressBar').style.width = progress + '%';
+                    document.getElementById('progressText').textContent = 'Gravando ' + Math.round(progress) + '%';
+                    
+                    // Delay menor para chunks menores
+                    await new Promise(resolve => setTimeout(resolve, 5));
+                }
+
+                // 3. Finalizar
+                const finishResponse = await fetch('/writeStream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'finish' })
+                });
+
+                if (finishResponse.ok) {
+                    document.getElementById('writeResult').innerHTML = '<div class="success">✅ Gravação concluída com verificação por chunk!</div>';
+                    if (document.getElementById('autoVerify').checked) {
+                        setTimeout(() => { verifyBios(); }, 1500);
+                    }
+                } else {
+                    throw new Error('Falha ao finalizar gravação');
+                }
+
+            } catch (err) {
+                document.getElementById('writeResult').innerHTML = '<div class="error">❌ ' + err.message + '</div>';
+            } finally {
+                document.getElementById('uploadProgress').style.display = 'none';
+            }
+        }
+
+        // Verificação otimizada
+        async function verifyBios() {
+            if (!originalFileData) {
+                document.getElementById('verifyResult').innerHTML = '<div class="error">❌ Nenhum arquivo original para comparar</div>';
+                document.getElementById('verifyResult').style.display = 'block';
+                return;
+            }
+
+            document.getElementById('verifyResult').innerHTML = '🔄 Iniciando verificação...';
+            document.getElementById('verifyResult').style.display = 'block';
+            document.getElementById('uploadProgress').style.display = 'block';
+
+            try {
+                const totalSize = originalFileSize;
+                const chunkSize = 2048; // 2KB para verificação
+                const totalChunks = Math.ceil(totalSize / chunkSize);
+                const readData = new Uint8Array(totalSize);
+                let offset = 0;
+
+                for (let i = 0; i < totalChunks; i++) {
+                    const currentChunkSize = Math.min(chunkSize, totalSize - offset);
+                    const hexAddr = '0x' + offset.toString(16).padStart(6, '0').toUpperCase();
+                    
+                    const response = await fetch('/read?addr=' + hexAddr + '&size=' + currentChunkSize);
+                    if (!response.ok) throw new Error('Falha na leitura chunk ' + (i + 1));
+                    
+                    const chunkBuffer = await response.arrayBuffer();
+                    readData.set(new Uint8Array(chunkBuffer), offset);
+                    offset += currentChunkSize;
+                    
+                    const progress = ((i + 1) / totalChunks) * 100;
+                    document.getElementById('progressBar').style.width = progress + '%';
+                    document.getElementById('progressText').textContent = 'Verificando ' + Math.round(progress) + '%';
+                    
+                    await new Promise(resolve => setTimeout(resolve, 3));
+                }
+
+                const readChecksum = crc32(readData).toString(16).toUpperCase();
+                const isMatch = readChecksum === originalChecksum;
+
+                let result = '<div class="' + (isMatch ? 'success' : 'error') + '"><h4>' + 
+                            (isMatch ? '✅ VERIFICAÇÃO PASSOU' : '❌ VERIFICAÇÃO FALHOU') + '</h4>';
+                result += '<b>Arquivo Original:</b><br>• Nome: ' + originalFileName + 
+                         '<br>• Tamanho: ' + originalFileSize + ' bytes<br>• CRC32: ' + originalChecksum + '<br><br>';
+                result += '<b>Dados Lidos do Chip:</b><br>• Tamanho: ' + readData.length + 
+                         ' bytes<br>• CRC32: ' + readChecksum + '<br><br>';
+
+                if (isMatch) {
+                    result += '🎉 <b>Os dados são idênticos!</b><br>✅ BIOS gravado com sucesso (SPI otimizado funcionou!)';
+                } else {
+                    result += '⚠️ <b>Os dados são diferentes!</b><br>❌ Erro na gravação ou corrupção<br>';
+                    result += '💡 <b>Sugestões:</b><br>• Tentar novamente com SPI ainda mais lento<br>• Verificar conexões físicas<br>• Executar diagnóstico avançado';
+                }
+                result += '</div>';
+
+                document.getElementById('verifyResult').innerHTML = result;
+
+            } catch (err) {
+                document.getElementById('verifyResult').innerHTML = '<div class="error">❌ ' + err.message + '</div>';
+            } finally {
+                document.getElementById('uploadProgress').style.display = 'none';
+            }
+        }
+
+        // Outras funções básicas
+        function readFlash() {
+            const addr = document.getElementById('readAddr').value;
+            const size = document.getElementById('readSize').value;
+            
+            fetch('/read?addr=' + addr + '&size=' + size)
+                .then(r => r.text())
+                .then(d => {
+                    document.getElementById('readResult').innerHTML = '<strong>Dados:</strong><br>' + d.substring(0, 1000);
+                })
+                .catch(e => document.getElementById('readResult').innerHTML = '<div class="error">' + e + '</div>');
+        }
+
+        function checkSystem() {
+            fetch('/system')
+                .then(r => r.json())
+                .then(d => {
+                    const info = '<div class="success"><b>Sistema ESP8266:</b><br>• RAM: ' + d.freeHeap + 
+                                ' bytes<br>• Uptime: ' + Math.floor(d.uptime / 1000) + 
+                                ' s<br>⚡ SPI: 500kHz (Otimizado)<br><b>W25Q32BV:</b><br>• JEDEC ID: ' + d.jedecId + '</div>';
+                    document.getElementById('systemInfo').innerHTML = info;
+                })
+                .catch(e => document.getElementById('systemInfo').innerHTML = '<div class="error">' + e + '</div>');
+        }
+
+        // Inicializar interface
+        window.onload = function() {
+            readChipId();
+            checkConnection();
+        };
+    </script>
+</body>
+</html>
