@@ -127,6 +127,21 @@ const char* password = "YourPassword";   // Your network password
 3. Click Upload (→)
 4. Wait for completion
 
+### ⚡ Important: All-in-One Firmware
+**🎯 Just compile the .ino file - that's it!**
+
+- ✅ The web interface (HTML/CSS/JS) is **already embedded** in the .ino file
+- ✅ No need to upload separate HTML files
+- ✅ No need to use filesystem (SPIFFS/LittleFS)
+- ✅ Everything works **out of the box** after compilation
+- 📄 The `index.html` file is just for **reference/preview** - not required for operation
+
+**What happens:**
+1. You compile `esp8266_w25q32_programmer.ino` in Arduino IDE
+2. Upload to ESP8266
+3. The web interface is **already there**, ready to use
+4. Just access the IP address in your browser
+
 ## 🌐 Using the Programmer
 
 ### 1. Connect to ESP8266
