@@ -1,4 +1,5 @@
 # ESP8266 W25Qxx BIOS Programmer
+# Leia-me em português nos arquivos.
 
 EPROM Programmer/Debugger for W25Qxx series (Winbond) BIOS chips using ESP8266, with **automatic capacity detection** and support from **2MB to 32MB**.
 
