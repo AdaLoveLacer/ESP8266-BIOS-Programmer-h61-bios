@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<!--
+╔════════════════════════════════════════════════════════════════════════════╗
+║  ⚠️  ATENÇÃO - ARQUIVO APENAS PARA VISUALIZAÇÃO/PREVIEW                    ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+Este arquivo index.html é APENAS para desenvolvimento e visualização.
+O HTML FUNCIONAL está dentro do arquivo esp8266_w25q32_programmer.ino
+
+🔴 REGRA IMPORTANTE:
+   1. SEMPRE edite PRIMEIRO o HTML dentro do arquivo .ino (função handleInterface)
+   2. DEPOIS atualize este arquivo index.html (opcional, só para preview)
+   3. NUNCA edite só este arquivo e esqueça o .ino!
+
+O ESP8266 NÃO usa este arquivo, apenas o que está embarcado no .ino!
+═══════════════════════════════════════════════════════════════════════════
+-->
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <title>ESP8266 W25Q32BV Programmer</title>
+    <style>
+        body { font-family: Arial; margin: 20px; background: #f0f0f0; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        button { padding: 10px 15px; margin: 5px; background: #007cba; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #005a87; }
+        .result { background: #f9f9f9; padding: 10px; margin: 10px 0; border-left: 4px solid #007cba; font-family: monospace; }
+        .warning { background: #fff3cd; border-left: 4px solid #ffc107; }
+        .error { background: #f8d7da; border-left: 4px solid #dc3545; }
+        .success { background: #d4edda; border-left: 4px solid #28a745; }
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <h1>�� ESP8266 W25Q32BV BIOS Programmer</h1>
+        
+        <div class='section'>
+            <h3>📋 Chip Info</h3>
+            <button onclick='readChipId()'>JEDEC ID</button>
+            <button onclick='readStatus()'>Status</button>
+            <div id='chipInfo' class='result'></div>
+        </div>
+        
+        <div class='section'>
+            <h3>⚙️ SPI Configuration</h3>
+            <label>Frequência SPI: </label>
+            <input type='range' id='spiFreqSlider' min='0.1' max='20' step='0.1' value='20' style='width:200px'>
+            <span id='spiFreqValue' style='margin-left:10px;font-weight:bold'>20.0 MHz</span><br>
+            <button onclick='applySpiFrequency()' style='background:#28a745;margin-top:10px'>Aplicar Frequência</button>
+            <!-- Quick presets -->
+            <div style='margin-top:8px'>
+                <button onclick="quickSpi(1)" style='background:#6c757d;margin-right:6px'>1 MHz</button>
+                <button onclick="quickSpi(4)" style='background:#6c757d;margin-right:6px'>4 MHz</button>
+                <button onclick="quickSpi(8)" style='background:#6c757d;margin-right:6px'>8 MHz</button>
+                <button onclick="quickSpi(20)" style='background:#6c757d'>20 MHz</button>
+            </div>
+            <div id='spiResult' class='result' style='margin-top:10px'></div>
+            <hr style='margin:15px 0'>
+            <label>Tamanho Chunk Verify: </label>
+            <select id='chunkSizeSelect' style='padding:5px;margin-left:5px'>
+                <option value='4096'>4 KB (1 setor)</option>
+                <option value='8192'>8 KB (2 setores)</option>
+                <option value='16384'>16 KB (4 setores)</option>
+                <option value='32768'>32 KB (8 setores)</option>
+                <option value='65536'>64 KB (16 setores)</option>
+            </select><br>
+            <button onclick='applyChunkSize()' style='background:#17a2b8;margin-top:10px'>Aplicar Chunk Size</button>
+            <div id='chunkResult' class='result' style='margin-top:10px'></div>
+        </div>
+        
+        <div class='section'>
+            <h3>📖 Read</h3>
+            Addr: <input type='text' id='readAddr' value='0x000000' style='width:100px'>
+            Size: <input type='text' id='readSize' value='256' style='width:80px'><br>
+            <button onclick='readFlash()'>Read Data</button>
+            <button onclick='dumpFullBios()'>Full Dump</button>
+            <div id='readResult' class='result'></div>
+        </div>
+        
+        <div class='section'>
+            <h3>✏️ Write</h3>
+            <p style='font-size:12px;color:#666;margin:5px 0'>⚡ <strong>Modo CHUNK-BY-CHUNK:</strong> Apaga setor → Escreve 1KB → Verifica → Próximo 1KB</p>
+            <input type='file' id='biosFile' accept='.bin,.rom,.bss'><br>
+            <button onclick='writeBiosStream()'>Write BIOS (Stream)</button>
+            <div id='writeResult' class='result'></div>
+            <div id='uploadProgress' style='display:none'>
+                <div style='background:#ddd;border-radius:3px;overflow:hidden'>
+                    <div id='progressBar' style='background:#007cba;height:20px;width:0%'></div>
+                </div>
+                <span id='progressText'>0%</span>
+            </div>
+        </div>
+        
+        <div class='section'>
+            <h3>🗑️ Erase</h3>
+            <div class='warning result'>⚠️ CUIDADO: Apagar tornará placa inutilizável!</div>
+            Setor (hex): <input type='text' id='sectorAddr' value='0x000000' style='width:100px'><br>
+            <button onclick='eraseSector()' style='background:#ffc107'>Erase Sector (4KB)</button>
+            <button onclick='eraseChip()' style='background:#dc3545'>Erase Chip Complete</button><br>
+            <button onclick='checkProtection()' style='background:#17a2b8;margin-top:10px'>🔍 Verificar Proteção</button>
+            <button onclick='removeProtection()' style='background:#28a745;margin-top:10px'>🔓 Remover Proteção</button>
+            <div id='eraseResult' class='result'></div>
+        </div>
+        
+        <div class='section'>
+            <h3>📟 Terminal (Erros e Avisos)</h3>
+            <button onclick='clearTerminal()'>Limpar</button>
+            <button onclick='toggleAutoScroll()' id='autoScrollBtn'>Auto-Scroll: ON</button>
+            <button onclick='decreaseVerbosity()' style='background:#ff6b6b'>🔇 -</button>
+            <span id='verbosityLevel' style='margin:0 10px;font-weight:bold'>Verbosidade: Verbose</span>
+            <button onclick='increaseVerbosity()' style='background:#51cf66'>🔊 +</button>
+            <div id='terminal' style='background:#1e1e1e;color:#00ff00;padding:10px;height:300px;overflow-y:auto;font-family:Consolas,monospace;font-size:12px;border-radius:5px'></div>
+        </div>
+    </div>
+
+    <script>
+        let originalFileBuffer = null;
+        
+        // Controle de frequência SPI
+        const spiSlider = document.getElementById('spiFreqSlider');
+        const spiValue = document.getElementById('spiFreqValue');
+        spiSlider.addEventListener('input', function() {
+            const val = parseFloat(this.value);
+            spiValue.textContent = (val >= 1 ? val.toFixed(1) + ' MHz' : (val * 1000).toFixed(0) + ' kHz');
+        });
+        
+        function applySpiFrequency() {
+            const freq = parseFloat(document.getElementById('spiFreqSlider').value);
+            fetch('/setSpiFrequency', { method: 'POST', body: JSON.stringify({ frequency: freq }) })
+                .then(r => r.json()).then(d => {
+                    if (d.success) {
+                        const f = d.frequency >= 1 ? d.frequency.toFixed(1) + ' MHz' : (d.frequency * 1000).toFixed(0) + ' kHz';
+                        document.getElementById('spiResult').innerHTML = '<div class="success">✅ Frequência alterada para ' + f + '</div>';
+                    } else {
+                        document.getElementById('spiResult').innerHTML = '<div class="error">❌ ' + d.error + '</div>';
+                    }
+                }).catch(e => document.getElementById('spiResult').innerHTML = '<div class="error">❌ ' + e.message + '</div>');
+        }
+        
+        function quickSpi(mhz) {
+            document.getElementById('spiFreqSlider').value = mhz;
+            document.getElementById('spiFreqValue').textContent = (mhz >= 1 ? mhz.toFixed(1) + ' MHz' : (mhz * 1000).toFixed(0) + ' kHz');
+            applySpiFrequency();
+        }
+        
+        function loadSpiFrequency() {
+            fetch('/getSpiFrequency').then(r => r.json()).then(d => {
+                const freqMHz = d.frequency / 1000000;
+                document.getElementById('spiFreqSlider').value = freqMHz.toFixed(1);
+                const display = freqMHz >= 1 ? freqMHz.toFixed(1) + ' MHz' : (freqMHz * 1000).toFixed(0) + ' kHz';
+                document.getElementById('spiFreqValue').textContent = display;
+            }).catch(e => console.error('Erro ao carregar frequência:', e));
+        }
+        
+        function applyChunkSize() {
+            const size = parseInt(document.getElementById('chunkSizeSelect').value);
+            fetch('/setVerifyChunkSize', { method: 'POST', body: JSON.stringify({ size: size }) })
+                .then(r => r.json()).then(d => {
+                    if (d.success) {
+                        document.getElementById('chunkResult').innerHTML = '<div class="success">✅ Chunk size: ' + d.sizeKB + ' KB</div>';
+                    } else {
+                        document.getElementById('chunkResult').innerHTML = '<div class="error">❌ ' + d.error + '</div>';
+                    }
+                }).catch(e => document.getElementById('chunkResult').innerHTML = '<div class="error">❌ ' + e.message + '</div>');
+        }
+        
+        function loadChunkSize() {
+            fetch('/getVerifyChunkSize').then(r => r.json()).then(d => {
+                document.getElementById('chunkSizeSelect').value = d.size;
+            }).catch(e => console.error('Erro ao carregar chunk size:', e));
+        }
+        
+        function readChipId() {
+            fetch('/id').then(r => r.json()).then(d => {
+                const chip = d.chipName || 'Unknown';
+                const sizeMB = d.sizeMB || '?';
+                const isWinbond = chip.startsWith('W25Q');
+                const info = isWinbond ? 
+                    '<div class=\"success\">✅ ' + chip + ' (' + d.id + ') - ' + sizeMB + ' MB</div>' : 
+                    '<div class=\"error\">❌ ID: ' + d.id + '</div>';
+                document.getElementById('chipInfo').innerHTML = info;
+            }).catch(e => document.getElementById('chipInfo').innerHTML = '<div class=\"error\">' + e + '</div>');
+        }
+        
+        function readStatus() {
+            fetch('/status').then(r => r.json()).then(d => {
+                const status = d.busy ? '🔄 Ocupado' : '✅ Pronto';
+                const wp = d.writeProtected ? '🔒 Protegido' : '🔓 Gravável';
+                document.getElementById('chipInfo').innerHTML = '<div>' + status + '<br>' + wp + '</div>';
+            }).catch(e => document.getElementById('chipInfo').innerHTML = '<div class=\"error\">' + e + '</div>');
+        }
+        
+        async function dumpFullBios() {
+            document.getElementById('readResult').innerHTML = '🔄 Dump...';
+            document.getElementById('uploadProgress').style.display = 'block';
+            try {
+                // Obter tamanho detectado do chip via endpoint (default 8MB se não disponível)
+                const sysInfo = await fetch('/system').then(r => r.json());
+                const totalSize = sysInfo.detectedFlashSize || 8388608;
+                const chunkSize = 4096;
+                const totalChunks = Math.ceil(totalSize / chunkSize);
+                const biosData = new Uint8Array(totalSize);
+                let offset = 0;
+                for (let i = 0; i < totalChunks; i++) {
+                    const hexAddr = '0x' + offset.toString(16).padStart(6, '0');
+                    const r = await fetch('/read?addr=' + hexAddr + '&size=' + chunkSize);
+                    if (!r.ok) throw new Error('Chunk ' + (i + 1) + ' failed');
+                    biosData.set(new Uint8Array(await r.arrayBuffer()), offset);
+                    offset += chunkSize;
+                    const p = ((i + 1) / totalChunks) * 100;
+                    document.getElementById('progressBar').style.width = p + '%';
+                    document.getElementById('progressText').textContent = Math.round(p) + '%';
+                    if (i % 10 === 0) await new Promise(r => setTimeout(r, 10));
+                }
+                const blob = new Blob([biosData]);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'bios_' + Date.now() + '.bin';
+                a.click();
+                URL.revokeObjectURL(url);
+                document.getElementById('readResult').innerHTML = '<div class=\"success\">✅ OK!</div>';
+            } catch (e) {
+                document.getElementById('readResult').innerHTML = '<div class=\"error\">❌ ' + e.message + '</div>';
+            } finally {
+                document.getElementById('uploadProgress').style.display = 'none';
+            }
+        }
+        
+        function readFlash() {
+            const addr = document.getElementById('readAddr').value;
+            const size = document.getElementById('readSize').value;
+            fetch('/read?addr=' + addr + '&size=' + size).then(r => r.text()).then(d => {
+                document.getElementById('readResult').innerHTML = d.substring(0, 500) + '...';
+            }).catch(e => document.getElementById('readResult').innerHTML = '<div class=\"error\">' + e + '</div>');
+        }
+        
+        async function writeBiosStream() {
+            const file = document.getElementById('biosFile').files[0];
+            if (!file) { alert('Selecione arquivo'); return; }
+            if (file.size > 8388608) { alert('Arquivo muito grande (max 8MB)'); return; }
+            document.getElementById('writeResult').innerHTML = '🔄 Preparando...';
+            document.getElementById('uploadProgress').style.display = 'block';
+            const reader = new FileReader();
+            originalFileBuffer = await new Promise(r => { reader.onload = e => r(new Uint8Array(e.target.result)); reader.readAsArrayBuffer(file); });
+            try {
+                await fetch('/writeStream', { method: 'POST', body: JSON.stringify({ action: 'init', size: file.size }) });
+                const chunkSize = 1024;
+                let offset = 0;
+                while (offset < file.size) {
+                    const chunk = file.slice(offset, offset + chunkSize);
+                    const reader2 = new FileReader();
+                    const data = await new Promise(r => { reader2.onload = e => r(e.target.result.split(',')[1]); reader2.readAsDataURL(chunk); });
+                    console.log('Chunk @' + offset + ': ' + chunk.size + ' bytes -> base64 ' + data.length + ' chars');
+                    await fetch('/writeChunk', { method: 'POST', body: JSON.stringify({ data: data }) });
+                    offset += chunkSize;
+                    const p = (offset / file.size) * 100;
+                    document.getElementById('progressBar').style.width = p + '%';
+                    document.getElementById('progressText').textContent = Math.round(p) + '%';
+                }
+                await fetch('/writeStream', { method: 'POST', body: JSON.stringify({ action: 'finish' }) });
+                document.getElementById('writeResult').innerHTML = '<div class=\"success\">✅ Gravado! Verificando...</div>';
+                await verifyChecksum();
+            } catch (e) {
+                document.getElementById('writeResult').innerHTML = '<div class=\"error\">❌ ' + e.message + '</div>';
+            } finally {
+                document.getElementById('uploadProgress').style.display = 'none';
+            }
+        }
+        
+        async function verifyChecksum() {
+            if (!originalFileBuffer) { alert('Arquivo original não disponível'); return; }
+            document.getElementById('writeResult').innerHTML = '🔄 Verificando integridade...';
+            document.getElementById('uploadProgress').style.display = 'block';
+            try {
+                const fileSize = originalFileBuffer.length;
+                const chunkSize = 4096;
+                let offset = 0, errors = 0;
+                let firstError = null, lastError = null, errorRanges = [];
+                while (offset < fileSize) {
+                    const currentChunk = Math.min(chunkSize, fileSize - offset);
+                    const hexAddr = '0x' + offset.toString(16).padStart(6, '0');
+                    const r = await fetch('/read?addr=' + hexAddr + '&size=' + currentChunk);
+                    const chipData = new Uint8Array(await r.arrayBuffer());
+                    const fileData = originalFileBuffer.slice(offset, offset + currentChunk);
+                    let chunkErrors = 0;
+                    for (let i = 0; i < chipData.length; i++) {
+                        if (chipData[i] !== fileData[i]) {
+                            errors++;
+                            chunkErrors++;
+                            const errorAddr = offset + i;
+                            if (!firstError) firstError = { addr: errorAddr, expected: fileData[i], got: chipData[i] };
+                            lastError = { addr: errorAddr, expected: fileData[i], got: chipData[i] };
+                        }
+                    }
+                    if (chunkErrors > 0) errorRanges.push({ start: offset, count: chunkErrors });
+                    offset += currentChunk;
+                    const p = (offset / fileSize) * 100;
+                    document.getElementById('progressBar').style.width = p + '%';
+                    document.getElementById('progressText').textContent = Math.round(p) + '%';
+                    if (offset % 40960 === 0) await new Promise(r => setTimeout(r, 10));
+                }
+                if (errors === 0) {
+                    document.getElementById('writeResult').innerHTML = '<div class=\"success\">✅ Verificação OK! BIOS íntegra (' + fileSize + ' bytes)</div>';
+                } else {
+                    let errorMsg = '<div class=\"error\">❌ ERRO: ' + errors + ' bytes corrompidos!<br>';
+                    errorMsg += '📍 Primeiro erro: 0x' + firstError.addr.toString(16).toUpperCase() + ' (esperado=0x' + firstError.expected.toString(16) + ', lido=0x' + firstError.got.toString(16) + ')<br>';
+                    errorMsg += '📍 Último erro: 0x' + lastError.addr.toString(16).toUpperCase() + '<br>';
+                    errorMsg += '📦 Regiões afetadas: ' + errorRanges.length + ' chunks<br>';
+                    errorMsg += '💡 Dica: Reduza velocidade SPI ou troque cabos</div>';
+                    document.getElementById('writeResult').innerHTML = errorMsg;
+                }
+            } catch (e) {
+                document.getElementById('writeResult').innerHTML = '<div class=\"error\">❌ Erro na verificação: ' + e.message + '</div>';
+            } finally {
+                document.getElementById('uploadProgress').style.display = 'none';
+            }
+        }
+        
+        function eraseSector() {
+            const addr = document.getElementById('sectorAddr').value;
+            if (!confirm('Apagar setor em ' + addr + '?')) return;
+            fetch('/eraseSector', { method: 'POST', body: JSON.stringify({ address: addr }) }).then(r => r.json()).then(d => {
+                document.getElementById('eraseResult').innerHTML = d.success ? '<div class=\"success\">✅ Setor apagado</div>' : '<div class=\"error\">❌ ' + d.error + '</div>';
+            }).catch(e => document.getElementById('eraseResult').innerHTML = '<div class=\"error\">' + e + '</div>');
+        }
+        
+        function eraseChip() {
+            if (!confirm('APAGAR COMPLETAMENTE O CHIP?\n\nIsto tornará a placa inutilizável!')) return;
+            if (!confirm('Tem certeza absoluta? Esta ação é IRREVERSÍVEL!')) return;
+            fetch('/eraseChip', { method: 'POST' }).then(r => r.json()).then(d => {
+                document.getElementById('eraseResult').innerHTML = d.success ? '<div class=\"success\">✅ Chip apagado</div>' : '<div class=\"error\">❌ ' + d.error + '</div>';
+            }).catch(e => document.getElementById('eraseResult').innerHTML = '<div class=\"error\">' + e + '</div>');
+        }
+        
+        // Funções de Proteção do Chip
+        function checkProtection() {
+            fetch('/checkProtection', { method: 'GET' }).then(r => r.json()).then(d => {
+                if (d.success) {
+                    const status = '0x' + d.status.toString(16).toUpperCase().padStart(2, '0');
+                    const msg = d.protected ? 
+                        '<div class="error">🔒 Chip PROTEGIDO<br>Status Register: ' + status + '<br>BP Bits: ' + d.bpBits + '</div>' :
+                        '<div class="success">🔓 Chip DESPROTEGIDO<br>Status Register: ' + status + '</div>';
+                    document.getElementById('eraseResult').innerHTML = msg;
+                } else {
+                    document.getElementById('eraseResult').innerHTML = '<div class="error">❌ Erro ao verificar proteção</div>';
+                }
+            }).catch(e => document.getElementById('eraseResult').innerHTML = '<div class="error">' + e + '</div>');
+        }
+        
+        function removeProtection() {
+            if (!confirm('Remover todas as proteções do chip?')) return;
+            fetch('/removeProtection', { method: 'POST' }).then(r => r.json()).then(d => {
+                document.getElementById('eraseResult').innerHTML = d.success ? 
+                    '<div class=\"success\">✅ Proteção removida com sucesso</div>' : 
+                    '<div class=\"error\">❌ ' + d.error + '</div>';
+            }).catch(e => document.getElementById('eraseResult').innerHTML = '<div class=\"error\">' + e + '</div>');
+        }
+        
+        // Funções do Terminal
+        let autoScroll = true;
+        let verbosity = 2;  // 0=Quiet, 1=Normal, 2=Verbose, 3=Debug
+        const verbLevels = ['Quiet', 'Normal', 'Verbose', 'Debug'];
+        
+        function clearTerminal() {
+            document.getElementById('terminal').innerHTML = '';
+        }
+        
+        function toggleAutoScroll() {
+            autoScroll = !autoScroll;
+            document.getElementById('autoScrollBtn').textContent = 'Auto-Scroll: ' + (autoScroll ? 'ON' : 'OFF');
+        }
+        
+        function increaseVerbosity() {
+            verbosity = Math.min(3, verbosity + 1);
+            updateVerbosityDisplay();
+            fetch('/setVerbosity', { method: 'POST', body: JSON.stringify({ level: verbosity }) });
+        }
+        
+        function decreaseVerbosity() {
+            verbosity = Math.max(0, verbosity - 1);
+            updateVerbosityDisplay();
+            fetch('/setVerbosity', { method: 'POST', body: JSON.stringify({ level: verbosity }) });
+        }
+        
+        function updateVerbosityDisplay() {
+            document.getElementById('verbosityLevel').textContent = 'Verbosidade: ' + verbLevels[verbosity];
+        }
+        
+        function addTerminalLine(line) {
+            const term = document.getElementById('terminal');
+            let color = '#00ff00';
+            if (line.includes('ERROR')) color = '#ff4444';
+            else if (line.includes('WARNING')) color = '#ffaa00';
+            else if (line.includes('INFO')) color = '#00aaff';
+            else if (line.includes('DEBUG')) color = '#999999';
+            term.innerHTML += '<div style="color:' + color + '">' + line + '</div>';
+            if (autoScroll) term.scrollTop = term.scrollHeight;
+        }
+        
+        function updateTerminal() {
+            fetch('/logs').then(r => r.json()).then(d => {
+                const term = document.getElementById('terminal');
+                term.innerHTML = '';
+                d.logs.forEach(log => addTerminalLine(log));
+            }).catch(e => console.error('Log fetch error:', e));
+        }
+        
+        // Atualizar terminal a cada 1 segundo
+        setInterval(updateTerminal, 1000);
+        
+        window.onload = () => {
+            readChipId();
+            updateTerminal();
+            loadSpiFrequency();
+            loadChunkSize();
+        };
+    </script>
+</body>
+</html>
